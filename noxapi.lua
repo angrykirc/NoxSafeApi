@@ -17,7 +17,7 @@ NoxApi.Util = {} -- alias for Client
 -- Waypoint/Journal WIP
 
 -- Code compatibility marker
-NoxApi.Version = 3
+NoxApi.Version = 4
 -- Set this to true, if you want to trade stability for performance
 NoxApi.DisableTableCheck = false
 
@@ -54,7 +54,7 @@ NoxApi.SFLAG_NPC_REACTION = 0x08000000
 
 -- Global game flags
 NoxApi.GFLAG_SHOW_EXTENTS = 0x2
-NoxApi.GFLAG_AIDEBUG = 0x8
+NoxApi.GFLAG_AI_DEBUG = 0x8
 NoxApi.GFLAG_GODMODE = 0x20
 NoxApi.GFLAG_DEBUG = 0x1000
 NoxApi.GFLAG_NO_TEXT = 0x10000
@@ -94,6 +94,47 @@ NoxApi.MS_MORPHED = 0x20000
 NoxApi.MS_ON_FIRE = 0x40000
 NoxApi.MS_STAY_DEAD = 0x80000
 NoxApi.MS_FRUSTRATED = 0x100000
+
+-- Monster actions
+NoxApi.ACTION_IDLE = 0
+NoxApi.ACTION_WAIT = 1
+NoxApi.ACTION_WAIT_RELATIVE = 2
+NoxApi.ACTION_ESCORT = 3
+NoxApi.ACTION_GUARD = 4
+NoxApi.ACTION_HUNT = 5
+NoxApi.ACTION_RETREAT = 6
+NoxApi.ACTION_MOVE_TO = 7
+NoxApi.ACTION_FAR_MOVE_TO = 8
+NoxApi.ACTION_DODGE = 9
+NoxApi.ACTION_ROAM = 10
+NoxApi.ACTION_PICKUP_OBJECT = 11
+NoxApi.ACTION_DROP_OBJECT = 12
+NoxApi.ACTION_FIND_OBJECT = 13
+NoxApi.ACTION_RETREAT_TO_MASTER = 14
+NoxApi.ACTION_FIGHT = 15
+NoxApi.ACTION_MELEE_ATTACK = 16
+NoxApi.ACTION_MISSILE_ATTACK = 17
+NoxApi.ACTION_CAST_SPELL_ON_OBJECT = 18
+NoxApi.ACTION_CAST_SPELL_ON_LOCATION = 19
+NoxApi.ACTION_CAST_DURATION_SPELL = 20
+NoxApi.ACTION_BLOCK_ATTACK = 21
+NoxApi.ACTION_BLOCK_FINISH = 22
+NoxApi.ACTION_WEAPON_BLOCK = 23
+NoxApi.ACTION_FLEE = 24
+NoxApi.ACTION_FACE_LOCATION = 25
+NoxApi.ACTION_FACE_OBJECT = 26
+NoxApi.ACTION_FACE_ANGLE = 27
+NoxApi.ACTION_SET_ANGLE = 28
+NoxApi.ACTION_RANDOM_WALK = 29
+NoxApi.ACTION_DYING = 30
+NoxApi.ACTION_DEAD = 31
+NoxApi.ACTION_REPORT = 32
+NoxApi.ACTION_MORPH_INTO_CHEST = 33
+NoxApi.ACTION_MORPH_BACK_TO_SELF = 34
+NoxApi.ACTION_GET_UP = 35
+NoxApi.ACTION_CONFUSED = 36
+NoxApi.ACTION_MOVE_TO_HOME = 37
+NoxApi.ACTION_INVALID = 38
 
 -- Map/gamemode flags
 NoxApi.MAPFLAG_SERVER = 1 -- IS NOT SET in Solo games!
@@ -353,6 +394,15 @@ local utilMemFree = memt.utilMemFree
 
 -- [BEGIN] NoxApi.Object
 
+-- helper func; attempts to convert string literal into a number found in NoxApi table; if fails, an error is raised
+local function tryConvertStringEnum(src, start, val)
+	val = string.upper(val)
+	local x = NoxApi[start .. val]
+	if x == nil then error(string.format("%s: Specified enum value '%s%s' not found", src, start, val)) end
+	assert(type(x) == "number", string.format("%s: Enum value '%s%s' is not a number", src, start, val))
+	return x
+end
+
 local function lookupObjectFields(self, v)
 	local r = NoxApi.Object[v]
 	
@@ -436,7 +486,7 @@ local function objSetNetworkReportFlag(obj, flag)
 end
 
 -- Creates a new object at specified coordinates with specified type/name
-function NoxApi.Object:CreateAt(name, x, y)
+function NoxApi.Object:CreateAt(name, x, y, suppressFinalize)
 	if type(name) ~= "number" then
 		assert(type(name) == "string", "Object:CreateAt: arg #1 -- name string or type number expected")
 	end
@@ -452,7 +502,7 @@ function NoxApi.Object:CreateAt(name, x, y)
 	local o = NoxApi.Object:Init(o, true)
 	-- Initialize object automatically, so you don't have to do it manually
 	-- This way you won't get "Invalid pointer" errors for objects that are not yet initialized by Nox
-	NoxApi.Object:FinalizeCreation()
+	if suppressFinalize == nil then NoxApi.Object:FinalizeCreation() end
 	return o
 end
 
@@ -545,7 +595,7 @@ end
 function NoxApi.Object:BuffRemove(buff)
 	if type(buff) == "string" then buff = NoxApi.Util:GetBuffIdByName(buff) end
 	assert(type(buff) == "number", "Object:BuffRemove: buff number or string expected")
-	assert(self:Exists(), "Object:BuffRemove: Invalid object pointer ")
+	assert(self:Exists(), "Object:BuffRemove: Invalid object pointer")
 
 	local buffUD = zeroUserdata
 	if (buff > 0) then buffUD = utilIntToPtr(buff) end
@@ -555,13 +605,13 @@ end
 -- Applies specified buff to specified object, argument safe
 function NoxApi.Object:BuffApply(buff, duration, power)
 	if type(buff) == "string" then buff = NoxApi.Util:GetBuffIdByName(buff) end
-	assert(type(buff) == "number", "Object:BuffApply: buff number or string expected")
-	assert(type(duration) == "number", "Object:BuffApply: duration number expected")
+	assert(type(buff) == "number", "Object:BuffApply: arg #1 -- number or string expected")
+	assert(type(duration) == "number", "Object:BuffApply: arg #2 -- number expected")
 	assert(self:Exists(), "Object:BuffApply: Invalid object pointer")
 
 	buffApply(self.ptr, buff, duration)
 	if power ~= nil then
-		assert(type(power) == "number", "Object:BuffApply: power number expected")
+		assert(type(power) == "number", "Object:BuffApply: arg #3 -- number expected")
 		setPtrByte(self.ptr, 0x198 + buff, power)
 	end
 end
@@ -627,13 +677,13 @@ end
 
 -- functionally equal to ObjectOn function in map editor
 function NoxApi.Object:Enable()
-	assert(self:Exists(), "Object:Enable: Invalid object pointer ")
+	assert(self:Exists(), "Object:Enable: Invalid object pointer")
 	ptrCall2(0x4E75B0, self.ptr, self.ptr)
 end
 
 -- functionally equal to ObjectOff function in map editor
 function NoxApi.Object:Disable()
-	assert(self:Exists(), "Object:Disable: Invalid object pointer ")
+	assert(self:Exists(), "Object:Disable: Invalid object pointer")
 	ptrCall2(0x4E7600, self.ptr, self.ptr)
 end
 
@@ -688,10 +738,27 @@ function NoxApi.Object:Team(val)
 	return NoxApi.Team:ById(self:TeamId())
 end
 
+-- Returns normalized distance to specified location OR point
+function NoxApi.Object:DistanceTo(valx, valy)
+	assert(self:Exists(), "Object:DistanceTo: invalid object ptr")
+	if type(valx) == "table" then
+		assert(valx.t == "srvobj", "Object:DistanceTo: arg #1 -- the table specified does not represent server object")
+		assert(valx:Exists(), "Object:DistanceTo: arg #1 -- invalid object ptr")
+		valx, valy = valx:Position()
+	end
+	assert(valx == "number", "Object:DistanceTo: arg #1 -- number or table expected")
+	assert(valy == "number", "Object:DistanceTo: arg #2 -- number expected")
+	
+	return NoxApi.Util:Distance(self:Position(), valx, valy)
+end
+
 -- checks specified class flag(s), argument safe
 function NoxApi.Object:CheckClass(class)
 	assert(self:Exists(), "Object:CheckClass: invalid object ptr")
-	assert(type(class) == "number", "Object:CheckClass: class number expected")
+	if type(class) == "string" then
+		class = tryConvertStringEnum("Object:CheckClass", "OC_", class)
+	end
+	assert(type(class) == "number", "Object:CheckClass: arg #1 -- number or string expected")
 	
 	if (bitAnd(getPtrUInt(self.ptr, 8), class) > 0) then return true end
 	return false
@@ -700,7 +767,10 @@ end
 -- checks whenether object is marked with specific flag, argument safe
 function NoxApi.Object:CheckFlag(flag)
 	assert(self:Exists(), "Object:CheckFlag: invalid object ptr")
-	assert(type(flag) == "number", "Object:CheckFlag: arg #1 -- number expected")
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Object:CheckFlag", "OF_", flag)
+	end
+	assert(type(flag) == "number", "Object:CheckFlag: arg #1 -- number or string expected")
 	
 	if (bitAnd(unitFlags(self.ptr), flag) > 0) then return true end
 	return false
@@ -709,7 +779,10 @@ end
 -- Sets or unsets the specified flag value for given object
 function NoxApi.Object:SetFlag(flag, val)
 	assert(self:Exists(), "Object:SetFlag: invalid object ptr")
-	assert(type(flag) == "number", "Object:SetFlag: arg #1 -- number expected")
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Object:SetFlag", "OF_", flag)
+	end
+	assert(type(flag) == "number", "Object:SetFlag: arg #1 -- number or string expected")
 	assert(type(val) == "boolean", "Object:SetFlag: arg #2 -- boolean expected")
 	local oldFlags = unitFlags(self.ptr)
 	
@@ -965,15 +1038,19 @@ function NoxApi.Object:Damage(value, dtype, source)
 		assert(source:Exists(), "Object:Damage: arg #3 -- invalid pointer for source object") 
 	end
 	assert(type(value) == "number", "Object:Damage: arg #1 -- value number expected")
-	assert(type(dtype) == "number", "Object:Damage: arg #2 -- dtype number expected")
+	-- Convert string name into numerical representation 
+	if type(dtype) == "string" then
+		dtype = tryConvertStringEnum("Object:Damage", "DAMAGE_", dtype)
+	end
+	assert(type(dtype) == "number", "Object:Damage: arg #2 -- dtype number or string expected")
 	assert(getPtrUInt(self.ptr, 0x2CC) > 0, "Object:Damage: object has no damage handler")
 	
 	-- Use native implementation if exists
 	if unitDamage ~= nil then
 		if source == nil then
-			unitDamage(self.ptr, nil, value, dtype)
+			unitDamage(self.ptr, nil, nil, value, dtype)
 		else
-			unitDamage(self.ptr, source.ptr, value, dtype)
+			unitDamage(self.ptr, source.ptr, nil, value, dtype)
 		end
 		return
 	end
@@ -995,19 +1072,25 @@ end
 -- [BEGIN] NoxApi.Monster
 
 -- Checks if at least one flag of monster status is set
-function NoxApi.Monster:CheckStatusFlags(flag)
-	assert(self:Exists(), "Monster:CheckStatusFlags: Invalid object pointer")
-	assert(type(flag) == "number", "Monster:CheckStatusFlags: arg #1 -- number expected")
+function NoxApi.Monster:CheckStatusFlag(flag)
+	assert(self:Exists(), "Monster:CheckStatusFlag: Invalid object pointer")
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Monster:CheckStatusFlag", "MS_", flag)
+	end
+	assert(type(flag) == "number", "Monster:CheckStatusFlag: arg #1 -- number or string expected")
 	local uc = getPtrPtr(self.ptr, 0x2EC)
 	
 	return bitAnd(getPtrUInt(uc, 0x5A0), flag) > 0
 end
 
 -- Sets monster's status flags 
-function NoxApi.Monster:SetStatusFlags(flag, val)
-	assert(self:Exists(), "Monster:SetStatusFlags: Invalid object pointer")
-	assert(type(flag) == "number", "Monster:SetStatusFlags: arg #1 -- number expected")
-	assert(type(val) == "boolean", "Monster:SetStatusFlags: arg #2 -- boolean expected")
+function NoxApi.Monster:SetStatusFlag(flag, val)
+	assert(self:Exists(), "Monster:SetStatusFlag: Invalid object pointer")
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Monster:SetStatusFlag", "MS_", flag)
+	end
+	assert(type(flag) == "number", "Monster:SetStatusFlag: arg #1 -- number or string expected")
+	assert(type(val) == "boolean", "Monster:SetStatusFlag: arg #2 -- boolean expected")
 	local uc = getPtrPtr(self.ptr, 0x2EC)
 	local of = getPtrUInt(uc, 0x5A0)
 	
@@ -1128,6 +1211,143 @@ function NoxApi.Monster:GetEnemy(val)
 	return NoxApi.Object:Init(getPtrPtr(uc, 0x4AC))
 end
 
+-- Clears action stack for a monster
+function NoxApi.Monster:ClearActionStack()
+	assert(self:Exists(), "Monster:ClearActionStack: Invalid object pointer")
+	
+	ptrCall2(0x50A3A0, self.ptr, zeroUserdata)
+end
+
+-- Returns the action on top of the stack, that is currently being performed
+function NoxApi.Monster:GetCurrentAction()
+	assert(self:Exists(), "Monster:IsActionScheduled: Invalid object pointer")
+	
+    local uc = getPtrPtr(self.ptr, 0x2EC)
+    return getPtrInt(uc, 0x228)
+end
+
+-- Returns true if specified event type is found inside monster's action stack
+function NoxApi.Monster:IsActionScheduled(act)
+	assert(self:Exists(), "Monster:IsActionScheduled: Invalid object pointer")
+	assert(type(act) == "number", "Monster:IsActionScheduled: arg #1 -- number expected")
+
+	ptrCall2(0x50A0D0, self.ptr, utilIntToPtr(act))
+end
+
+-- helper func
+local function monsterValidateObject(obj, argn)
+	assert(type(obj) == "table", string.format("Monster:PushActionStack: invalid type for arg #%i -- table expected", argn))
+	assert(obj.t == "srvobj", string.format("Monster:PushActionStack: arg #%i must be an object table", argn))
+	assert(obj:Exists(), string.format("Monster:PushActionStack: arg #%i refers to an object that does not exist in-game", argn))
+end
+
+-- Push action into monster's AI stack
+-- Returns true if ok, false + error message in case of failure
+function NoxApi.Monster:PushActionStack(idx, vala, valb, valc)
+	assert(self:Exists(), "Monster:PushAction: Invalid object pointer")
+	if type(idx) == "string" then
+		idx = tryConvertStringEnum("Monster:PushAction", "ACTION_", idx)
+	end
+	assert(type(idx) == "number", "Monster:PushAction: arg #1 -- number or string expected")
+	
+	-- Validate range
+	assert(idx >= 0 and idx <= 38, "Monster:PushAction: arg #1 -- value out of valid range [0; 38]")
+	
+	-- Validate argument types
+	-- [WARNING! UGLY CODE! Think that you are using disassembler]
+	if idx == NoxApi.ACTION_WAIT or idx == NoxApi.ACTION_WAIT_RELATIVE or idx == NoxApi.ACTION_FACE_ANGLE or idx == NoxApi.ACTION_SET_ANGLE or idx == NoxApi.ACTION_REPORT then 
+		assert(type(vala) == "number", "Monster:PushAction: invalid type for arg #2 -- number expected") 
+	end
+	if idx == NoxApi.ACTION_ESCORT or idx == NoxApi.ACTION_FIGHT or idx == NoxApi.ACTION_PICKUP_OBJECT or idx == NoxApi.ACTION_FACE_OBJECT then 
+		monsterValidateObject(vala, 2) 
+	end
+	-- No arguments for 4, 5, 6
+	if idx >= NoxApi.ACTION_MOVE_TO and idx <= NoxApi.ACTION_DODGE or idx == NoxApi.ACTION_MISSILE_ATTACK or idx == NoxApi.ACTION_FLEE or idx == NoxApi.ACTION_FACE_LOCATION then 
+		assert(type(vala) == "number", "Monster:PushAction: invalid type for arg #2 -- number expected")
+		assert(type(valb) == "number", "Monster:PushAction: invalid type for arg #3 -- number expected")
+	end
+	if idx == NoxApi.ACTION_ROAM or idx == NoxApi.ACTION_BLOCK_ATTACK then 
+		-- TODO: ACTION_ROAM can accept waypoints as 1'st arg (see 0x5123C0)
+		assert(type(vala) == "number", "Monster:PushAction: invalid type for arg #2 -- number expected")
+	end
+	-- 12, 13 are unused
+	-- 14 has no arguments
+	-- 16 has no arguments
+	if idx == NoxApi.ACTION_CAST_SPELL_ON_OBJECT or idx == NoxApi.ACTION_CAST_DURATION_SPELL then
+		if type(vala) == "string" then vala = NoxApi.Util:GetSpellIdByName(vala) end
+		assert(type(vala) == "number" and vala > 0, "Monster:PushAction: invalid type for arg #2 -- number or string expected")
+		monsterValidateObject(valb, 3)
+	end
+	if idx == NoxApi.ACTION_CAST_SPELL_ON_LOCATION then
+		if type(vala) == "string" then vala = NoxApi.Util:GetSpellIdByName(vala) end
+		assert(type(vala) == "number" and vala > 0, "Monster:PushAction: invalid type for arg #2 -- number or string expected")
+		assert(type(valb) == "number", "Monster:PushAction: invalid type for arg #3 -- number expected")
+		assert(type(valc) == "number", "Monster:PushAction: invalid type for arg #4 -- number expected")
+	end
+		
+	local x, y = self:Position()
+	local act = unitSetAction(self.ptr, idx)
+	-- Can be returned by game in case there is too many actions in stack
+	if act == zeroUserdata then return false, "Stack overflow" end
+	
+	-- Set arguments
+	if idx == NoxApi.ACTION_WAIT or idx == NoxApi.ACTION_WAIT_RELATIVE or idx == NoxApi.ACTION_FACE_ANGLE or idx == NoxApi.ACTION_SET_ANGLE or idx == NoxApi.ACTION_REPORT then 
+		setPtrUInt(act, 4, vala) 
+	end 
+	if idx == NoxApi.ACTION_ESCORT then
+		x, y = vala:Position()
+		setPtrFloat(act, 4, x)
+		setPtrFloat(act, 8, y)
+		setPtrPtr(act, 12, vala.ptr)
+	end
+	if idx == NoxApi.ACTION_GUARD then 
+		setPtrFloat(act, 4, x)
+		setPtrFloat(act, 8, y)
+		setPtrUInt(act, 12, getPtrByte(self.ptr, 0x7C))
+	end
+	if idx >= NoxApi.ACTION_MOVE_TO and idx <= NoxApi.ACTION_DODGE or idx == NoxApi.ACTION_MISSILE_ATTACK or idx == NoxApi.ACTION_FLEE or idx == NoxApi.ACTION_FACE_LOCATION then
+		setPtrFloat(act, 4, vala)
+		setPtrFloat(act, 8, valb)
+		setPtrInt(act, 12, 0)
+	end
+	if idx == NoxApi.ACTION_ROAM then 
+		setPtrInt(act, 4, 0)
+		setPtrInt(act, 8, vala)
+	end
+	if idx == NoxApi.ACTION_PICKUP_OBJECT or idx == NoxApi.ACTION_FACE_OBJECT then
+		setPtrPtr(act, 4, vala.ptr)
+	end
+	if idx == NoxApi.ACTION_FIGHT then
+		x, y = vala:Position()
+		setPtrFloat(act, 4, x)
+		setPtrFloat(act, 8, y)
+		setPtrUInt(act, 12, getFrameCounter())
+	end
+	if idx == NoxApi.ACTION_CAST_SPELL_ON_OBJECT or idx == NoxApi.ACTION_CAST_DURATION_SPELL then
+		setPtrInt(act, 4, vala)
+		setPtrPtr(act, 12, valb.ptr)
+	end
+	if idx == NoxApi.ACTION_CAST_SPELL_ON_LOCATION then
+		setPtrInt(act, 4, vala)
+		setPtrInt(act, 8, 0)
+		setPtrFloat(act, 12, valb)
+		setPtrFloat(act, 16, valc)
+		setPtrInt(act, 20, 0)
+	end
+	if idx == NoxApi.ACTION_BLOCK_ATTACK then
+		setPtrInt(act, 4, getFrameCounter() + vala) -- how long the block lasts
+	end
+	if idx == NoxApi.ACTION_MOVE_TO_HOME then
+		local uc = getPtrPtr(self.ptr, 0x2EC)
+		x = getPtrFloat(uc, 0x17C)
+		y = getPtrFloat(uc, 0x180)
+		setPtrFloat(act, 4, x)
+		setPtrFloat(act, 8, y)
+		setPtrInt(act, 12, 0)
+	end
+	return true
+end
+
 -- Returns or updates color scheme for an NPC 
 function NoxApi.Monster:NPCAppearance(colorN, R, G, B)
 	assert(self:Exists(), "Monster:NPCAppearance: Invalid object pointer")
@@ -1157,7 +1377,10 @@ function NoxApi.Monster:NPCSpell(spell, useflag)
 		if spell <= 0 then return end
 	end
 	assert(type(spell) == "number", "Monster:NPCSpell: arg #1 -- number or string expected")
-	assert(type(useflag) == "number", "Monster:NPCSpell: arg #2 -- number expected")
+	if type(useflag) == "string" then
+		useflag = tryConvertStringEnum("Monster:NPCSpell", "SFLAG_", useflag)
+	end
+	assert(type(useflag) == "number", "Monster:NPCSpell: arg #2 -- number or string expected")
 	
 	local uc = getPtrPtr(self.ptr, 0x2EC)
 	local offset = 4 * spell + 0x5D0
@@ -1224,12 +1447,12 @@ end
 
 -- Iterates through all players on the server
 function NoxApi.Player:IterateAll(func)
-	assert(type(func) == "function", "Player:IterateAll: arg #1 -- function expected")
+	if func ~= nil then assert(type(func) == "function", "Player:IterateAll: arg #1 -- function expected") end
 
 	local player = ptrCall2(0x416EA0, zeroUserdata, zeroUserdata)
 	local counter = 0
 	while player ~= zeroUserdata do
-		func(NoxApi.Player:Init(player))
+		if func ~= nil then func(NoxApi.Player:Init(player)) end
 		counter = counter + 1
 		player = ptrCall2(0x416EE0, player, zeroUserdata)
 	end
@@ -1237,25 +1460,34 @@ function NoxApi.Player:IterateAll(func)
 end
 
 -- returns true if at least one given player status flags is set 
-function NoxApi.Player:CheckStatus(val)
-	assert(type(val) == "number", "Player:CheckStatus: arg #1 -- number expected")
+function NoxApi.Player:CheckStatus(flag)
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Player:CheckStatus", "PLRSTATUS_", flag)
+	end
+	assert(type(flag) == "number", "Player:CheckStatus: arg #1 -- number or string expected")
 	
 	local stat = getPtrUInt(self.ptr, 0xE60)
-	return bitAnd(stat, val) > 0
+	return bitAnd(stat, flag) > 0
 end
 
 -- sets player status flags
-function NoxApi.Player:SetStatus(val)
-	assert(type(val) == "number", "Player:SetStatus: arg #1 -- number expected")
+function NoxApi.Player:SetStatus(flag)
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Player:SetStatus", "PLRSTATUS_", flag)
+	end
+	assert(type(flag) == "number", "Player:SetStatus: arg #1 -- number or string expected")
 	
-	ptrCall2(0x4174F0, self.ptr, utilIntToPtr(val))
+	ptrCall2(0x4174F0, self.ptr, utilIntToPtr(flag))
 end
 
 -- removes player status flags
-function NoxApi.Player:ClearStatus(val)
-	assert(type(val) == "number", "Player:ClearStatus: arg #1 -- number expected")
+function NoxApi.Player:ClearStatus(flag)
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Player:ClearStatus", "PLRSTATUS_", flag)
+	end
+	assert(type(flag) == "number", "Player:ClearStatus: arg #1 -- number or string expected")
 	
-	ptrCall2(0x417530, self.ptr, utilIntToPtr(val))
+	ptrCall2(0x417530, self.ptr, utilIntToPtr(flag))
 end
 
 -- wrapper for Unimod' playerInfo()
@@ -1344,6 +1576,8 @@ function NoxApi.Player:SendNotice(text)
 	
 	if netMsgBox ~= nil then
 		netMsgBox(self:Id(), text)
+	else
+		NoxApi.Util:ConPrint("[warning] NoxApi.Player:SendNotice() -- unsupported by Unimod version")
 	end
 end
 
@@ -1376,8 +1610,8 @@ end
 -- Gets or sets player's mouse coordinates. Doesn't alter direction
 function NoxApi.Player:MousePos(x, y)
 	if x ~= nil then
-		assert(type(x) == "number", "Player.MousePos: arg #1 -- x number is expected")
-		assert(type(y) == "number", "Player.MousePos: arg #2 -- y number is expected")
+		assert(type(x) == "number", "Player:MousePos: arg #1 -- x number is expected")
+		assert(type(y) == "number", "Player:MousePos: arg #2 -- y number is expected")
 		setPtrUInt(self.ptr, 0x8EC, x)
 		setPtrUInt(self.ptr, 0x8F0, y)
 	end
@@ -1406,7 +1640,7 @@ end
 function NoxApi.Player:Action(actid)
 	local p_obj = self:GetObject()
 	if p_obj == nil then return nil end
-	assert(p_obj:Exists(), "Player.Action: Invalid object pointer")
+	assert(p_obj:Exists(), "Player:Action: Invalid object pointer")
 	
 	local uc = getPtrPtr(p_obj.ptr, 0x2EC)
 	if uc == nil then return end
@@ -1418,6 +1652,15 @@ function NoxApi.Player:Action(actid)
     setPtrInt(self.ptr, 0x88, getFrameCounter())
 	
 	return actid
+end
+
+-- Returns or alters the team player is in
+function NoxApi.Player:Team(val)
+	local p_obj = self:GetObject()
+	if p_obj == nil then return nil end
+	
+	-- Error checking is done in following function
+	return p_obj:Team(val)
 end
 
 -- [END] NoxApi.Player
@@ -1464,12 +1707,19 @@ function NoxApi.Team:ById(num)
 	return NoxApi.Team:Init(t.teamPtr)
 end
 
+-- Creates a new team with default parameters
+function NoxApi.Team:Create()
+	return NoxApi.Team:Init(teamCreate())
+end
+
 -- Iterates through all teams on server, calls func
 function NoxApi.Team:IterateAll(func)
-	local ctr = 0
+	if func ~= nil then assert(type(func) == "function", "Team:IterateAll: arg #1 -- function expected") end
+	
 	local team = ptrCall2(0x418B10, zeroUserdata, zeroUserdata)
+	local ctr = 0
 	while team ~= zeroUserdata do
-		func(NoxApi.Team:Init(team))
+		if func ~= nil then func(NoxApi.Team:Init(team)) end
 		ctr = ctr + 1
 		team = ptrCall2(0x418B60, zeroUserdata, zeroUserdata)
 	end
@@ -1657,15 +1907,15 @@ end
 
 local ptr_DeathmatchFlags = utilIntToPtr(0x654D60)
 -- Returns true if specified DeathmatchFlags are set
-function NoxApi.Server:CheckDeathmatchFlags(flag)
-	assert(type(flag) == "number", "Server:CheckDeathmatchFlags: arg #1 -- number expected")
+function NoxApi.Server:CheckDeathmatchFlag(flag)
+	assert(type(flag) == "number", "Server:CheckDeathmatchFlag: arg #1 -- number expected")
 	return bitAnd(getPtrUInt(ptr_DeathmatchFlags, 0), flag) > 0
 end
 
 -- Sets or clears specified DeathmatchFlags 
-function NoxApi.Server:SetDeathmatchFlags(flag, val)
-	assert(type(flag) == "number", "Server:SetDeathmatchFlags: arg #1 -- number expected")
-	assert(type(val) == "boolean", "Server:SetDeathmatchFlags: arg #2 -- boolean expected")
+function NoxApi.Server:SetDeathmatchFlag(flag, val)
+	assert(type(flag) == "number", "Server:SetDeathmatchFlag: arg #1 -- number expected")
+	assert(type(val) == "boolean", "Server:SetDeathmatchFlag: arg #2 -- boolean expected")
 	local f = getPtrUInt(ptr_DeathmatchFlags, 0)
 	
 	if val then
@@ -1682,23 +1932,29 @@ function NoxApi.Server:TeamDamage(val)
 	if val ~= nil then
 		assert(type(val) == "boolean", "Server:TeamDamage: arg #1 -- boolean expected")
 		
-		NoxApi.Server:SetDeathmatchFlags(1, val)
+		NoxApi.Server:SetDeathmatchFlag(1, val)
 	end
 	
-	return NoxApi.Server:CheckDeathmatchFlags(1)
+	return NoxApi.Server:CheckDeathmatchFlag(1)
 end
 
 local ptr_ServerRuleFlags = utilIntToPtr(0x5D5330)
 -- Returns true if specified RuleFlags are set
-function NoxApi.Server:CheckRuleFlags(flag)
-	assert(type(flag) == "number", "Server:CheckRuleFlags: arg #1 -- number expected")
+function NoxApi.Server:CheckRuleFlag(flag)
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Server:CheckRuleFlag", "RFLAG_", flag)
+	end
+	assert(type(flag) == "number", "Server:CheckRuleFlag: arg #1 -- number or string expected")
 	return bitAnd(getPtrUInt(ptr_ServerRuleFlags, 0), flag) > 0
 end
 
 -- Sets or clears specified RuleFlags 
-function NoxApi.Server:SetRuleFlags(flag, val)
-	assert(type(flag) == "number", "Server:SetRuleFlags: arg #1 -- number expected")
-	assert(type(val) == "boolean", "Server:SetRuleFlags: arg #2 -- boolean expected")
+function NoxApi.Server:SetRuleFlag(flag, val)
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Server:SetRuleFlag", "RFLAG_", flag)
+	end
+	assert(type(flag) == "number", "Server:SetRuleFlag: arg #1 -- number or string expected")
+	assert(type(val) == "boolean", "Server:SetRuleFlag: arg #2 -- boolean expected")
 	local f = getPtrUInt(ptr_ServerRuleFlags, 0)
 	
 	if val then
@@ -1717,10 +1973,10 @@ function NoxApi.Server:CamperAlarm(val)
 		if val ~= nil then
 		assert(type(val) == "boolean", "Server:CamperAlarm: arg #1 -- boolean expected")
 		
-		NoxApi.Server:SetRuleFlags(0x2000, val)
+		NoxApi.Server:SetRuleFlag(0x2000, val)
 	end
 	
-	return NoxApi.Server:CheckRuleFlags(0x2000)
+	return NoxApi.Server:CheckRuleFlag(0x2000)
 end
 
 -- Returns number of players on the server ignoring these in observer mode
@@ -1759,16 +2015,42 @@ function NoxApi.Server:PrintToAll(str)
 	utilMemFree(strptr)
 end
 
+-- Returns true if specified game mode flag was set
+function NoxApi.Server:CheckMapFlag(mode)
+	if type(mode) == "string" then
+		mode = tryConvertStringEnum("Server:CheckMapFlag", "MAPFLAG_", flag)
+	end
+	assert(type(mode) == "number", "Server:CheckMapFlag: mode number or string expected")
+	
+	if (bitAnd(gameFlags(), mode) == mode) then return true end
+	return false
+end
+
+-- Sets or unsets specified map flags
+function NoxApi.Server:SetMapFlag(flag, value)
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Server:SetMapFlag", "MAPFLAG_", flag)
+	end
+	assert(type(flag) == "number", "Server:SetMapFlag: arg #1 -- number or string expected")
+	assert(type(val) == "boolean", "Server:SetMapFlag: arg #2 -- boolean expected")
+	local f = gameFlags()
+	
+	if val then
+		gameFlags(bitOr(f, flag))
+	else
+		if bitAnd(f, flag) == flag then
+			gameFlags(bitXor(f, flag))
+		end
+	end
+end
+
 -- [END] NoxApi.Server
 
 -- [BEGIN] NoxApi.Util
 
--- Returns true if specified game mode flag was set
+-- Alias for Server:CheckMapFlag (shared between client and server)
 function NoxApi.Util:CheckMapFlag(mode)
-	assert(type(mode) == "number", "Util:CheckMapFlags: mode number expected")
-	
-	if (bitAnd(gameFlags(), mode) == mode) then return true end
-	return false
+	return NoxApi.Server:CheckMapFlag(mode)
 end
 
 -- Returns numerical buff id from specified string id. -1 if not found.
@@ -1855,15 +2137,21 @@ end
 
 local ptr_GameGFlags = utilIntToPtr(0x85B7A0)
 -- Returns true if specified GFlags are set
-function NoxApi.Util:CheckGFlags(flag)
-	assert(type(flag) == "number", "Util:CheckGFlags: arg #1 -- number expected")
+function NoxApi.Util:CheckGFlag(flag)
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Util:CheckGFlag", "GFLAG_", flag)
+	end
+	assert(type(flag) == "number", "Util:CheckGFlag: arg #1 -- number or string expected")
 	return bitAnd(getPtrUInt(ptr_GameGFlags, 0), flag) > 0
 end
 
 -- Sets or clears specified GFlags 
-function NoxApi.Util:SetGFlags(flag, val)
-	assert(type(flag) == "number", "Util:SetGFlags: arg #1 -- number expected")
-	assert(type(val) == "boolean", "Util:SetGFlags: arg #2 -- boolean expected")
+function NoxApi.Util:SetGFlag(flag, val)
+	if type(flag) == "string" then
+		flag = tryConvertStringEnum("Util:SetGFlag", "GFLAG_", flag)
+	end
+	assert(type(flag) == "number", "Util:SetGFlag: arg #1 -- number or string expected")
+	assert(type(val) == "boolean", "Util:SetGFlag: arg #2 -- boolean expected")
 	local f = getPtrUInt(ptr_GameGFlags, 0)
 	
 	if val then

@@ -1,0 +1,12 @@
+TODO:
+Document every function in this API
+Add more events: PlayerOnJoinTeam, OnMapScript...
+Support referencing object properties by dot (obj.CurrentHealth) instead of function calls (obj:CurrentHealth())
+
+DONE:
+Reference enumerated values/constants by their short names, e.g...
+Object:CheckFlag("EQUIPPED")
+Monster:CheckStatusFlags("RUNNING")
+
+Monster:PushAction("ACTION_HUNT",{target=who})
+Monster:ClearActionStack()

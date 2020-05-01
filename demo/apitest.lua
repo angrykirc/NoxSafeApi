@@ -12,23 +12,29 @@ if plr ~= nil then
 	unitOnDrop(magicapple.ptr, function(what, who)
 		who = NoxApi.Object:Init(who) -- Initialize from unsafe pointer
 		if who ~= nil then -- If object really exists...
+			-- Fix for duplicate wizards
+			-- (game thinks that apple is still inside your inventory if you die from death ray)
+			if who:CurrentHealth() <= 0 then return end 
 			-- Damage the owner if dropped
-			who:Damage(100, NoxApi.DAMAGE_ZAP_RAY)
+			who:Damage(50, "ZAP_RAY")
 			
 			-- Make a wizard 
 			wiz = NoxApi.Object:CreateAt("Wizard", who:Position())
 			-- Initialize (or else our spells will be overriden one frame later)
-			--NoxApi.Object:FinalizeCreation()
-			-- Only death ray spell
+			--NoxApi.Object:FinalizeCreation() -- now NoxApi framework does that automatically
+			
+			-- Leave only death ray spell
 			for i = 1, 137 do
 				wiz:NPCSpell(i, 0)
 			end
-			wiz:NPCSpell(16, NoxApi.SFLAG_NPC_OFFENSE)
+			wiz:NPCSpell(16, "NPC_OFFENSE")
 			-- 100% accuracy
 			wiz:MonsterInfo({ aimSkill = 1, offensiveTimeoutMin = 5, offensiveTimeoutMax = 10 })
-			print('a')
 			-- He knows where you are
 			wiz:SetEnemy(who)
+			-- And he is deadly
+			wiz:PushActionStack("CAST_SPELL_ON_OBJECT", "SPELL_DEATH_RAY", who)
+			wiz:PushActionStack("CAST_SPELL_ON_OBJECT", "SPELL_SHIELD", wiz)
 		end
 	end)
 	unitOnPickup(magicapple.ptr, function(what, who)

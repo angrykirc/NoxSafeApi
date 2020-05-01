@@ -52,7 +52,7 @@ end
 
 local function ctfEventHandler(name, args)
 	if name == "PlayerLeave" or name == "PlayerStopObserving" then
-		-- Mark as non-eligible for switching
+		-- Mark as non-eligible for observing
 		obsPlayers[args.player:Id()] = false
 	elseif name == "PlayerChat" then
 		if string.sub(args.text, 0, 7) == "/obsctf" then
