@@ -27,7 +27,7 @@ if plr ~= nil then
 			for i = 1, 137 do
 				wiz:NPCSpell(i, 0)
 			end
-			wiz:NPCSpell(16, "NPC_OFFENSE")
+			wiz:NPCSpell("SPELL_DEATH_RAY", "NPC_OFFENSE")
 			-- 100% accuracy
 			wiz:MonsterInfo({ aimSkill = 1, offensiveTimeoutMin = 5, offensiveTimeoutMax = 10 })
 			-- He knows where you are

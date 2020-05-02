@@ -17,7 +17,7 @@ NoxApi.Util = {} -- alias for Client
 -- Waypoint/Journal WIP
 
 -- Code compatibility marker
-NoxApi.Version = 4
+NoxApi.Version = 5
 -- Set this to true, if you want to trade stability for performance
 NoxApi.DisableTableCheck = false
 
@@ -241,6 +241,48 @@ NoxApi.OC_FLAG = 0x10000000 -- Object is a flag used in CTF game mode
 NoxApi.OC_CLIENT_PERSIST = 0x20000000 -- 
 NoxApi.OC_CLIENT_PREDICT = 0x40000000 --
 NoxApi.OC_PICKUP = 0x80000000 --
+
+-- Some network messages
+NoxApi.MSG_FX_PARTICLEFX = 0x7C
+NoxApi.MSG_FX_PLASMA = 0x7D
+NoxApi.MSG_FX_SUMMON = 0x7E
+NoxApi.MSG_FX_SUMMON_CANCEL = 0x7F
+NoxApi.MSG_FX_SHIELD = 0x80
+NoxApi.MSG_FX_BLUE_SPARKS = 0x81
+NoxApi.MSG_FX_YELLOW_SPARKS = 0x82
+NoxApi.MSG_FX_CYAN_SPARKS = 0x83
+NoxApi.MSG_FX_VIOLET_SPARKS = 0x84
+NoxApi.MSG_FX_EXPLOSION = 0x85
+NoxApi.MSG_FX_LESSER_EXPLOSION = 0x86
+NoxApi.MSG_FX_COUNTERSPELL_EXPLOSION = 0x87
+NoxApi.MSG_FX_THIN_EXPLOSION = 0x88
+NoxApi.MSG_FX_TELEPORT = 0x89
+NoxApi.MSG_FX_SMOKE_BLAST = 0x8A
+NoxApi.MSG_FX_DAMAGE_POOF = 0x8B
+NoxApi.MSG_FX_LIGHTNING = 0x8C
+NoxApi.MSG_FX_ENERGY_BOLT = 0x8D
+NoxApi.MSG_FX_CHAIN_LIGHTNING_BOLT = 0x8E
+NoxApi.MSG_FX_DRAIN_MANA = 0x8F
+NoxApi.MSG_FX_CHARM = 0x90
+NoxApi.MSG_FX_GREATER_HEAL = 0x91
+NoxApi.MSG_FX_MAGIC = 0x92
+NoxApi.MSG_FX_SPARK_EXPLOSION = 0x93
+NoxApi.MSG_FX_DEATH_RAY = 0x94
+NoxApi.MSG_FX_SENTRY_RAY = 0x95
+NoxApi.MSG_FX_RICOCHET = 0x96
+NoxApi.MSG_FX_JIGGLE = 0x97
+NoxApi.MSG_FX_GREEN_BOLT = 0x98
+NoxApi.MSG_FX_GREEN_EXPLOSION = 0x99
+NoxApi.MSG_FX_WHITE_FLASH = 0x9A
+NoxApi.MSG_FX_GENERATING_MAP = 0x9B
+NoxApi.MSG_FX_ASSEMBLING_MAP = 0x9C
+NoxApi.MSG_FX_POPULATING_MAP = 0x9D
+NoxApi.MSG_FX_DURATION_SPELL = 0x9E
+NoxApi.MSG_FX_DELTAZ_SPELL_START = 0x9F
+NoxApi.MSG_FX_TURN_UNDEAD = 0xA0
+NoxApi.MSG_FX_ARROW_TRAP = 0xA1
+NoxApi.MSG_FX_VAMPIRISM = 0xA2
+NoxApi.MSG_FX_MANA_BOMB_CANCEL = 0xA3
 
 -- [END] NoxApi enumerations
 
@@ -890,7 +932,7 @@ end
 
 -- Gets or sets poison level of specified monster or player
 function NoxApi.Object:Poison(lvl)
-	assert(self:Exists(), "Object:Poison: Invalid object pointer ")
+	assert(self:Exists(), "Object:Poison: Invalid object pointer")
 	if lvl == nil then return getPtrByte(self.ptr, 0x21C) end
 	
 	assert(type(lvl) == "number", "Object:Poison: arg #1 -- number expected")
@@ -904,13 +946,14 @@ end
 
 -- Returns true if monster can traverse specified point
 function NoxApi.Object:CanVisitPoint(x, y)
+	assert(self:Exists(), "Object:CanVisitPoint: Invalid object pointer")
 	assert(type(x) == "number", "Object:CanVisitPoint: x number expected")
 	assert(type(y) == "number", "Object:CanVisitPoint: y number expected")
 	
 	local m = utilMAlloc(8)
 	setPtrFloat(m, 0, x)
 	setPtrFloat(m, 4, y)
-	local r = ptrCall2(0x50B810, ptr, m)
+	local r = ptrCall2(0x50B810, self.ptr, m)
 	utilMemFree(m)
 	if r == zeroUserdata then return false end
 	return true
@@ -918,17 +961,18 @@ end
 
 -- Returns true if monster can traverse specified point
 function NoxApi.Object:CanVisitPoint2(x, y)
-	assert(type(x) == "number", "Object:CanVisitPoint: x number expected")
-	assert(type(y) == "number", "Object:CanVisitPoint: y number expected")
+	assert(self:Exists(), "Object:CanVisitPoint2: Invalid object pointer")
+	assert(type(x) == "number", "Object:CanVisitPoint2: x number expected")
+	assert(type(y) == "number", "Object:CanVisitPoint2: y number expected")
 	
-	local x2, y2 = unitPos(ptr)
+	local x2, y2 = unitPos(self.ptr)
 	local m = utilMAlloc(16)
 	
 	setPtrFloat(m, 0, x)
 	setPtrFloat(m, 4, y)
 	setPtrFloat(m, 8, x2)
 	setPtrFloat(m, 12, y2)
-	local r = ptrCall2(0x50B580, ptr, m)
+	local r = ptrCall2(0x50B580, self.ptr, m)
 	utilMemFree(m)
 	if r == zeroUserdata then return false end
 	return true
@@ -1226,12 +1270,20 @@ function NoxApi.Monster:GetCurrentAction()
     return getPtrInt(uc, 0x228)
 end
 
+-- Pops value from action stack
+function NoxApi.Monster:PopActionStack()
+	assert(self:Exists(), "Monster:PopActionStack: Invalid object pointer")
+	return unitActionPop(self.ptr)
+end
+
 -- Returns true if specified event type is found inside monster's action stack
 function NoxApi.Monster:IsActionScheduled(act)
 	assert(self:Exists(), "Monster:IsActionScheduled: Invalid object pointer")
 	assert(type(act) == "number", "Monster:IsActionScheduled: arg #1 -- number expected")
 
-	ptrCall2(0x50A0D0, self.ptr, utilIntToPtr(act))
+	local x = ptrCall2(0x50A0D0, self.ptr, utilIntToPtr(act))
+	if x == zeroUserdata then return false end
+	return true
 end
 
 -- helper func
@@ -1246,43 +1298,43 @@ end
 function NoxApi.Monster:PushActionStack(idx, vala, valb, valc)
 	assert(self:Exists(), "Monster:PushAction: Invalid object pointer")
 	if type(idx) == "string" then
-		idx = tryConvertStringEnum("Monster:PushAction", "ACTION_", idx)
+		idx = tryConvertStringEnum("Monster:PushActionStack", "ACTION_", idx)
 	end
-	assert(type(idx) == "number", "Monster:PushAction: arg #1 -- number or string expected")
+	assert(type(idx) == "number", "Monster:PushActionStack: arg #1 -- number or string expected")
 	
 	-- Validate range
-	assert(idx >= 0 and idx <= 38, "Monster:PushAction: arg #1 -- value out of valid range [0; 38]")
+	assert(idx >= 0 and idx <= 38, "Monster:PushActionStack: arg #1 -- value out of valid range [0; 38]")
 	
 	-- Validate argument types
 	-- [WARNING! UGLY CODE! Think that you are using disassembler]
 	if idx == NoxApi.ACTION_WAIT or idx == NoxApi.ACTION_WAIT_RELATIVE or idx == NoxApi.ACTION_FACE_ANGLE or idx == NoxApi.ACTION_SET_ANGLE or idx == NoxApi.ACTION_REPORT then 
-		assert(type(vala) == "number", "Monster:PushAction: invalid type for arg #2 -- number expected") 
+		assert(type(vala) == "number", "Monster:PushActionStack: invalid type for arg #2 -- number expected") 
 	end
 	if idx == NoxApi.ACTION_ESCORT or idx == NoxApi.ACTION_FIGHT or idx == NoxApi.ACTION_PICKUP_OBJECT or idx == NoxApi.ACTION_FACE_OBJECT then 
 		monsterValidateObject(vala, 2) 
 	end
 	-- No arguments for 4, 5, 6
 	if idx >= NoxApi.ACTION_MOVE_TO and idx <= NoxApi.ACTION_DODGE or idx == NoxApi.ACTION_MISSILE_ATTACK or idx == NoxApi.ACTION_FLEE or idx == NoxApi.ACTION_FACE_LOCATION then 
-		assert(type(vala) == "number", "Monster:PushAction: invalid type for arg #2 -- number expected")
-		assert(type(valb) == "number", "Monster:PushAction: invalid type for arg #3 -- number expected")
+		assert(type(vala) == "number", "Monster:PushActionStack: invalid type for arg #2 -- number expected")
+		assert(type(valb) == "number", "Monster:PushActionStack: invalid type for arg #3 -- number expected")
 	end
 	if idx == NoxApi.ACTION_ROAM or idx == NoxApi.ACTION_BLOCK_ATTACK then 
 		-- TODO: ACTION_ROAM can accept waypoints as 1'st arg (see 0x5123C0)
-		assert(type(vala) == "number", "Monster:PushAction: invalid type for arg #2 -- number expected")
+		assert(type(vala) == "number", "Monster:PushActionStack: invalid type for arg #2 -- number expected")
 	end
 	-- 12, 13 are unused
 	-- 14 has no arguments
 	-- 16 has no arguments
 	if idx == NoxApi.ACTION_CAST_SPELL_ON_OBJECT or idx == NoxApi.ACTION_CAST_DURATION_SPELL then
 		if type(vala) == "string" then vala = NoxApi.Util:GetSpellIdByName(vala) end
-		assert(type(vala) == "number" and vala > 0, "Monster:PushAction: invalid type for arg #2 -- number or string expected")
+		assert(type(vala) == "number" and vala > 0, "Monster:PushActionStack: invalid type for arg #2 -- number or string expected")
 		monsterValidateObject(valb, 3)
 	end
 	if idx == NoxApi.ACTION_CAST_SPELL_ON_LOCATION then
 		if type(vala) == "string" then vala = NoxApi.Util:GetSpellIdByName(vala) end
-		assert(type(vala) == "number" and vala > 0, "Monster:PushAction: invalid type for arg #2 -- number or string expected")
-		assert(type(valb) == "number", "Monster:PushAction: invalid type for arg #3 -- number expected")
-		assert(type(valc) == "number", "Monster:PushAction: invalid type for arg #4 -- number expected")
+		assert(type(vala) == "number" and vala > 0, "Monster:PushActionStack: invalid type for arg #2 -- number or string expected")
+		assert(type(valb) == "number", "Monster:PushActionStack: invalid type for arg #3 -- number expected")
+		assert(type(valc) == "number", "Monster:PushActionStack: invalid type for arg #4 -- number expected")
 	end
 		
 	local x, y = self:Position()
@@ -1521,7 +1573,8 @@ function NoxApi.Player:ObserveMonster(x_obj)
 	local p_obj = self:GetObject()
 	if p_obj == nil then return end
 	if x_obj == nil then 
-		playerLook(p_obj, nil)
+		playerLook(p_obj.ptr, nil)
+		return
 	end
 	
 	assert(type(x_obj) == "table", "Player:ObserveMonster: arg #1 -- table expected")
@@ -1905,6 +1958,72 @@ function NoxApi.Server:AudioEvent(sound, x, y)
 	soundMake(sound, x, y)
 end
 
+-- Plays specified visual FX on specified location
+function NoxApi.Server:PlayFX(name, x1, y1, x2, y2, xv)
+	if type(name) == "string" then name = tryConvertStringEnum("Server:PlayFX", "MSG_FX_", name) end
+	assert(type(name) == "number", "Server:PlayFX: arg #1 -- number or string expected")
+
+	if name == NoxApi.MSG_FX_SHIELD then
+		assert(type(x1) == "table", "Server:PlayFX: arg #2 -- table expected")
+		assert(x1:Exists(), "Server:PlayFX: arg #2 -- invalid object pointer")
+		
+		netShieldFx(x1.ptr, 0, 0)
+		
+	elseif name == NoxApi.MSG_FX_SPARK_EXPLOSION or name == NoxApi.MSG_FX_JIGGLE or name == NoxApi.MSG_FX_ARROW_TRAP then
+		assert(type(x1) == "number", "Server:PlayFX: arg #2 -- number expected")
+		assert(type(y1) == "number", "Server:PlayFX: arg #3 -- number expected")
+		assert(type(x2) == "number", "Server:PlayFX: arg #4 -- number expected")
+		
+		local pt = utilMAlloc(8)
+		setPtrFloat(pt, 0, x1)
+		setPtrFloat(pt, 4, y1)
+		
+		if name == NoxApi.MSG_FX_SPARK_EXPLOSION then
+			ptrCall2(0x5231B0, pt, utilIntToPtr(x2))
+		elseif name == NoxApi.MSG_FX_ARROW_TRAP then
+			ptrCall2(0x5238A0, pt, utilIntToPtr(x2))
+		elseif name == NoxApi.MSG_FX_JIGGLE then
+			ptrCall2(0x4D9110, pt, utilIntToPtr(x2))
+		end
+		utilMemFree(pt)
+		
+	elseif name == NoxApi.MSG_FX_MAGIC then
+		error("Server:PlayFX: unsupported effect type")
+		
+	elseif name == NoxApi.MSG_FX_GREEN_BOLT then
+		assert(type(x1) == "number", "Server:PlayFX: arg #2 -- number expected")
+		assert(type(y1) == "number", "Server:PlayFX: arg #3 -- number expected")
+		assert(type(x2) == "number", "Server:PlayFX: arg #4 -- number expected")
+		assert(type(y2) == "number", "Server:PlayFX: arg #5 -- number expected")
+		assert(type(xv) == "number", "Server:PlayFX: arg #6 -- number expected")
+		
+		local pt = utilMAlloc(16)
+		setPtrInt(pt, 0, x1)
+		setPtrInt(pt, 4, y1)
+		setPtrInt(pt, 8, x2)
+		setPtrInt(pt, 12, y2)
+		ptrCall2(0x523790, pt, utilIntToPtr(xv))
+		utilMemFree(pt)
+		
+	elseif name >= NoxApi.MSG_FX_BLUE_SPARKS and name <= NoxApi.MSG_FX_DAMAGE_POOF or name == NoxApi.MSG_FX_RICOCHET or name == NoxApi.MSG_FX_TURN_UNDEAD or name == NoxApi.MSG_FX_WHITE_FLASH or name == NoxApi.MSG_FX_MANA_BOMB_CANCEL then
+		assert(type(x1) == "number", "Server:PlayFX: arg #2 -- number expected")
+		assert(type(y1) == "number", "Server:PlayFX: arg #3 -- number expected")
+		
+		netPointFx(name, x1, y1)
+		
+	elseif name >= NoxApi.MSG_FX_LIGHTNING and name <= NoxApi.MSG_FX_SENTRY_RAY or name == NoxApi.MSG_FX_VAMPIRISM or name == NoxApi.MSG_FX_PLASMA then
+		assert(type(x1) == "number", "Server:PlayFX: arg #2 -- number expected")
+		assert(type(y1) == "number", "Server:PlayFX: arg #3 -- number expected")
+		assert(type(x2) == "number", "Server:PlayFX: arg #4 -- number expected")
+		assert(type(y2) == "number", "Server:PlayFX: arg #5 -- number expected")
+		
+		netRayFx(name, x1, y1, x2, y2)
+		
+	else
+		error("Server:PlayFX: unsupported effect type")
+	end
+end
+
 local ptr_DeathmatchFlags = utilIntToPtr(0x654D60)
 -- Returns true if specified DeathmatchFlags are set
 function NoxApi.Server:CheckDeathmatchFlag(flag)
@@ -1970,7 +2089,7 @@ end
 
 -- Returns true if camper alarm is enabled; enables or disables it if argument is present
 function NoxApi.Server:CamperAlarm(val)
-		if val ~= nil then
+	if val ~= nil then
 		assert(type(val) == "boolean", "Server:CamperAlarm: arg #1 -- boolean expected")
 		
 		NoxApi.Server:SetRuleFlag(0x2000, val)
@@ -2048,31 +2167,46 @@ end
 
 -- [BEGIN] NoxApi.Util
 
--- Alias for Server:CheckMapFlag (shared between client and server)
+-- Alias for Server:CheckMapFlag (value is shared between client and server)
 function NoxApi.Util:CheckMapFlag(mode)
 	return NoxApi.Server:CheckMapFlag(mode)
 end
 
--- Returns numerical buff id from specified string id. -1 if not found.
+-- Returns numerical buff id from specified string literal. -1 if not found.
 function NoxApi.Util:GetBuffIdByName(name)
 	assert(type(name) == "string", "Util:GetBuffIdByName: string expected")
+	-- prepend ENCHANT_
+	if string.sub(name, 0, 8) ~= "ENCHANT_" then name = "ENCHANT_" .. name end
 
 	local mstr = utilMemLdStr8(name)
 	local result = ptrCall2(0x424880, mstr, zeroUserdata)
 	utilMemFree(mstr)
-	if result == zeroUserdata then return 0 end
+	if result == zeroUserdata then return -1 end
 	return utilPtrToInt(result)
 end
 
--- Returns numerical spell id from specified string id. -1 if not found.
+-- Returns numerical spell id from specified string literal. -1 if not found.
 function NoxApi.Util:GetSpellIdByName(name)
 	assert(type(name) == "string", "Util:GetSpellIdByName: string expected")
+	-- prepend SPELL_
+	if string.sub(name, 0, 6) ~= "SPELL_" then name = "SPELL_" .. name end
 
 	local mstr = utilMemLdStr8(name)
 	local result = ptrCall2(0x4243F0, mstr, zeroUserdata)
 	utilMemFree(mstr)
-	if result == zeroUserdata then return 0 end
+	if result == zeroUserdata then return -1 end
 	return utilPtrToInt(result)
+end
+
+-- Returns monster action id from specified string literal. -1 if not found.
+function NoxApi.Util:GetActionIdByName(name)
+	assert(type(name) == "string", "Util:GetActionIdByName: string expected")
+	-- prepend ACTION_
+	if string.sub(name, 0, 7) ~= "ACTION_" then name = "ACTION_" .. name end
+
+	local result = NoxApi[name]
+	if type(result) ~= "number" then return -1 end
+	return result
 end
 
 -- Returns numeric sound id from string name
@@ -2103,7 +2237,7 @@ function NoxApi.Util:GetItemEnchantId(name)
 	local res = ptrCall2(0x413290, mstr, zeroUserdata)
 	utilMemFree(mstr)
 	res = utilPtrToInt(res)
-	if res == 255 then return -1 end -- not found
+	if res == 255 then return -1 end 
 	return res
 end
 
@@ -2135,6 +2269,16 @@ function NoxApi.Util:IsServer()
 	return bitAnd(gameFlags(), 0x801) > 0
 end
 
+local ptr_PlasmaJmp = utilIntToPtr(0x4BA99B)
+-- Unlock Plasma/Staff of Oblivion visuals in multiplayer (only for client though)
+function NoxApi.Util:UnlockPlasma(val)
+	if val then 
+		setPtrByte(ptr_PlasmaJmp, 0, 0xEB)
+	else
+		setPtrByte(ptr_PlasmaJmp, 0, 0x75)
+	end
+end
+
 local ptr_GameGFlags = utilIntToPtr(0x85B7A0)
 -- Returns true if specified GFlags are set
 function NoxApi.Util:CheckGFlag(flag)
@@ -2161,6 +2305,12 @@ function NoxApi.Util:SetGFlag(flag, val)
 			setPtrUInt(ptr_GameGFlags, 0, bitXor(f, flag))
 		end
 	end
+end
+
+local ptr_GameFPS = utilIntToPtr(0x85B3FC)
+-- Returns Frames per second value
+function NoxApi.Util:GetGameFPS()
+	return getPtrInt(ptr_GameFPS, 0)
 end
 
 -- returns distance^2 between two points
