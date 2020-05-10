@@ -741,6 +741,11 @@ function NoxApi.Object:IsPlayer()
     return self:CheckClass(4)
 end
 
+-- returns true if specified object has DEAD flag set
+function NoxApi.Object:IsDead()
+    return self:CheckFlag(0x8000)
+end
+
 -- returns true if specified object has MONSTER class flag, argument safe
 function NoxApi.Object:IsMonster()
     return self:CheckClass(2)
@@ -1068,6 +1073,7 @@ end
 -- Attempts to equip a piece of armor or weapon, works only on npc's or players
 function NoxApi.Object:TryEquip(obj)
     assert(self:Exists(), "Object:TryEquip: Invalid object pointer")
+    assert(not self:IsDead(), "Object:TryEquip: dead players cannot equip items")
     assert(self:CheckClass(4) or self:CheckClass(2), "Object:TryEquip: Only players or NPCs may equip items")
     assert(type(obj) == "table", "Object:TryEquip: arg #1 -- must be an object")
     assert(obj:Exists(), "Object:TryEquip: arg #1 -- Invalid object pointer")

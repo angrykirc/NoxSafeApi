@@ -106,6 +106,7 @@ end
 
 function SavePlayerInventory(plr)
     local p_obj = plr:GetObject()
+    if p_obj:IsDead() then dp(string.format("Cannot save inventory for %s: Player is dead", plr:CharName())) return end
     
     rwstr("PINV")
     rwstr("ITEM")
@@ -162,6 +163,7 @@ end
 
 function LoadPlayerInventory(plr)
     local p_obj = plr:GetObject()
+    if p_obj:IsDead() then dp(string.format("Cannot save inventory for %s: Player is dead", plr:CharName())) return end
     
     if rwstr() ~= "PINV" then
         dp("Wrong playerinventory file header!")
@@ -204,22 +206,23 @@ function ClosePlayerFile()
 end
 
 function eventHandler(name, args)
-	if name == "PlayerChat" then
-		local chars = string.sub(args.text, 0, 8)
-		if chars == "/invsave" then
-			args.filter = true
-            
-			OpenPlayerFile(args.player, "w+")
+    if name == "PlayerChat" then
+        local chars = string.sub(args.text, 0, 8)
+        
+        if chars == "/invsave" then
+            args.filter = true
+
+            OpenPlayerFile(args.player, "w+")
             SavePlayerInventory(args.player)
             ClosePlayerFile()
         elseif chars == "/invload" then
             args.filter = true
-            
-			OpenPlayerFile(args.player, "r")
+
+            OpenPlayerFile(args.player, "r")
             LoadPlayerInventory(args.player)
             ClosePlayerFile()
-		end
-	end
+        end
+    end
 end
 
 NoxApi.Server:RegisterEvent(eventHandler)
