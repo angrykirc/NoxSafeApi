@@ -17,7 +17,7 @@ NoxApi.Util = {} -- alias for Client
 -- Waypoint/Journal WIP
 
 -- Code compatibility marker
-NoxApi.Version = 5
+NoxApi.Version = 6
 -- Set this to true, if you want to trade stability for performance
 NoxApi.DisableTableCheck = false
 
@@ -332,7 +332,14 @@ if memt.bug then
     getPtrUInt = getPtrInt
 end
 
-function memt.utilIntToPtr(num)
+function memt.utilSIntToPtr(num)
+    if num <= 0 then return memt.zeroUserdata end
+    setPtrInt(memt.t, 0, num)
+    
+    return getPtrPtr(memt.t, 0)
+end
+
+function memt.utilUIntToPtr(num)
     if num <= 0 then return memt.zeroUserdata end
     setPtrUInt(memt.t, 0, num)
     
@@ -354,8 +361,8 @@ function memt.utilPtrToInt(ptr)
 end
 
 -- SUPER HACK to get userdata(0)
-memt.oneUserdata = memt.utilIntToPtr(1)
-setPtrUInt(memt.utilIntToPtr(0x6F7B20), 0, 0)
+memt.oneUserdata = memt.utilUIntToPtr(1)
+setPtrUInt(memt.utilUIntToPtr(0x6F7B20), 0, 0)
 memt.zeroUserdata = ptrCall2(0x4896C0, memt.oneUserdata, memt.oneUserdata)
 
 -- Allocates specified string in game memory. (1 byte char)
@@ -424,7 +431,7 @@ end
 
 local zeroUserdata = memt.zeroUserdata
 local oneUserdata = memt.oneUserdata
-local utilIntToPtr = memt.utilIntToPtr
+local utilUIntToPtr = memt.utilUIntToPtr
 local utilFltToPtr = memt.utilFltToPtr
 local utilPtrToInt = memt.utilPtrToInt
 local utilMemLdStr8 = memt.utilMemLdStr8
@@ -491,7 +498,7 @@ local function checkExistsImpl(ptr)
         it = getPtrPtr(it, 0x1BC)
     end
     -- Do it again for pending creation objects
-    it = getPtrPtr(utilIntToPtr(0x750710), 0)
+    it = getPtrPtr(utilUIntToPtr(0x750710), 0)
     while (it ~= zeroUserdata and it ~= nil) do
         if it == ptr then return true end
         it = getPtrPtr(it, 0x1BC)
@@ -640,7 +647,7 @@ function NoxApi.Object:BuffRemove(buff)
     assert(self:Exists(), "Object:BuffRemove: Invalid object pointer")
 
     local buffUD = zeroUserdata
-    if (buff > 0) then buffUD = utilIntToPtr(buff) end
+    if (buff > 0) then buffUD = utilUIntToPtr(buff) end
     return ptrCall2(0x4FF5B0, self.ptr, buffUD)
 end
 
@@ -761,7 +768,7 @@ function NoxApi.Object:TeamId(val)
     if val ~= nil then
         assert(type(val) == "number", "Object:TeamId: arg #1 -- number expected")
         if val >= 0 then
-            ptrCall2(0x419090, self.ptr, utilIntToPtr(val))
+            ptrCall2(0x419090, self.ptr, utilUIntToPtr(val))
         end
     end
 
@@ -853,11 +860,11 @@ function NoxApi.Object:HealthRestore(heal)
     assert(self:Exists(), "Object:HealthRestore: Invalid object pointer")
 
     if heal > 0 then
-        return ptrCall2(0x4EE460, self.ptr, utilIntToPtr(heal))
+        return ptrCall2(0x4EE460, self.ptr, utilUIntToPtr(heal))
     end
 end
 
--- Gets or sets maximum health amount for an object
+-- Gets or sets maximum health amount for an object (or nil if object is indestructible)
 function NoxApi.Object:MaxHealth(setval)
     assert(self:Exists(), "Object:MaxHealth: Invalid object pointer ")
   
@@ -871,10 +878,10 @@ function NoxApi.Object:MaxHealth(setval)
         
         return getPtrShort(hd, 4)
     end
-    return 0
+    return nil
 end
 
--- Returns or alters a specified object's current health
+-- Returns or alters a specified object's current health (or nil if object is indestructible)
 function NoxApi.Object:CurrentHealth(setval)
     assert(self:Exists(), "Object:CurrentHealth: Invalid object pointer ")
   
@@ -888,7 +895,7 @@ function NoxApi.Object:CurrentHealth(setval)
         
         return getPtrShort(hd, 0)
     end
-    return 0
+    return nil
 end
 
 -- Raises specified object to specified height
@@ -941,7 +948,7 @@ function NoxApi.Object:Poison(lvl)
     else
         ptrCall2(0x4EE9D0, self.ptr, self.ptr) -- remove poison
     end
-    ptrCall2(0x4EEA90, self.ptr, utilIntToPtr(lvl)) -- call original function which sends update packet
+    ptrCall2(0x4EEA90, self.ptr, utilUIntToPtr(lvl)) -- call original function which sends update packet
 end
 
 -- Returns true if monster can traverse specified point
@@ -998,17 +1005,23 @@ end
 -- iterates through object's inventory, calling func for every item found
 function NoxApi.Object:IterateInventory(func)
     assert(self:Exists(), "Object:IterateInventory: Invalid object pointer")
-    assert(type(func) == "function", "Object:IterateInventory: function expected")
+    if func ~= nil then
+        assert(type(func) == "function", "Object:IterateInventory: function expected")
+    end
     
     local item = getPtrPtr(self.ptr, 0x1F8)
+    local c = 0
     while item ~= nil do
-        func(NoxApi.Object:Init(item))
+        if func ~= nil then func(NoxApi.Object:Init(item)) end
+        c = c + 1
         item = getPtrPtr(item, 0x1F0)
     end
+    return c
 end
 
 -- custom implementation of unitInventoryPut because the current one is bugged
--- puts object obj into inventory of self, (alerts player if report is set to true, makes sound [TODO])
+-- Puts object obj into inventory of self, (TODO: alerts player if report is set to true, makes sound...)
+-- returns true on success, false otherwise
 function NoxApi.Object:InvPut(obj, report)
     assert(self:Exists(), "Object:InvPut: Invalid object pointer")
     assert(obj:Exists(), "Object:InvPut: arg #1 -- Invalid object pointer")
@@ -1017,26 +1030,28 @@ function NoxApi.Object:InvPut(obj, report)
     
     -- check for native support
     if unitInventoryPlace ~= nil then
-        unitInventoryPlace(self.ptr, obj.ptr)
+        return unitInventoryPlace(self.ptr, obj.ptr) > 0
     end
     
     -- pointer to shellcode
-    local shellPtr = utilIntToPtr(0x4F2F80)
+    local shellPtr = utilUIntToPtr(0x4F2F80)
     
     -- save current code
     local shellOrigA = getPtrPtr(shellPtr, 0)
     local shellOrigB = getPtrPtr(shellPtr, 8)
 
     -- patch code
-    setPtrPtr(shellPtr, 0, utilIntToPtr(0x00076BE8))
-    setPtrPtr(shellPtr, 8, utilIntToPtr(0x90C35E5F))
+    setPtrPtr(shellPtr, 0, utilUIntToPtr(0x00076BE8))
+    setPtrPtr(shellPtr, 8, utilUIntToPtr(0x90C35E5F))
     
     -- make a fn call
-    ptrCall2(0x4F2F70, self.ptr, obj.ptr)
+    local result = ptrCall2(0x4F2F70, self.ptr, obj.ptr)
     
     -- restore original code
     setPtrPtr(shellPtr, 0, shellOrigA)
     setPtrPtr(shellPtr, 8, shellOrigB)
+    if result == zeroUserdata then return false end
+    return true
 end
 
 -- Drops an item from someone's inventory
@@ -1072,6 +1087,74 @@ function NoxApi.Object:TryDequip(obj)
     local result = ptrCall2(0x4F2FB0, self.ptr, obj.ptr)
     if result == zeroUserdata then return false end
     return true
+end
+
+-- Returns or alters the number of charges for object 
+function NoxApi.Object:AmmoCharges(val)
+    assert(self:Exists(), "Object:AmmoCharges: Invalid object pointer")
+    local wtype = self:GetWeaponType()
+    assert(self:CheckClass(0x1000) or wtype == 2, "Object:AmmoCharges: Object is not a wand or quiver")
+    
+    local data = getPtrPtr(self.ptr, 0x2E0)
+    if data == nil then return nil end
+    
+    if val ~= nil then
+        assert(type(val) == "number", "Object:AmmoCharges: arg #1 -- number expected")
+        if val > 255 then val = 255 end
+        if wtype == 2 then
+            -- quiver
+            setPtrByte(data, 1, val)
+        else
+            -- wand
+            setPtrByte(data, 0x6C, val)
+            -- recalculate percentage (of full charge -- used by obelisks)
+            setPtrUInt(data, 0x70, val / getPtrByte(data, 0x6D) * 100)
+        end
+    end
+    
+    if wtype == 2 then
+        return getPtrByte(data, 1)
+    else
+        return getPtrByte(data, 0x6C)
+    end
+end
+
+-- Returns or alters the maximal number of charges for object 
+function NoxApi.Object:AmmoMaxCharges(val)
+    assert(self:Exists(), "Object:AmmoMaxCharges: Invalid object pointer")
+    local wtype = self:GetWeaponType()
+    assert(self:CheckClass(0x1000) or wtype == 2, "Object:AmmoMaxCharges: Object is not a wand or quiver")
+    
+    local data = getPtrPtr(self.ptr, 0x2E0)
+    if data == nil then return nil end
+    
+    if val ~= nil then
+        assert(type(val) == "number", "Object:AmmoMaxCharges: arg #1 -- number expected")
+        if val > 255 then val = 255 end
+        if wtype == 2 then
+            -- quiver
+            setPtrByte(data, 0, val)
+        else
+            -- wand
+            setPtrByte(data, 0x6D, val)
+            -- recalculate percentage (of full charge -- used by obelisks)
+            setPtrUInt(data, 0x70, getPtrByte(data, 0x6C) / val * 100)
+        end
+    end
+    
+    if wtype == 2 then
+        return getPtrByte(data, 0)
+    else
+        return getPtrByte(data, 0x6D)
+    end
+end
+
+-- Returns value that Nox uses internally to ditinguish different armor and weapons
+function NoxApi.Object:GetWeaponType()
+    assert(self:Exists(), "Object:GetWeaponType: Invalid object pointer")
+    
+    local result = ptrCall2(0x415820, self.ptr, self.ptr)
+    return utilPtrToInt(result)
 end
 
 -- Deals damage by usage of default object function 0x2CC 
@@ -1281,7 +1364,7 @@ function NoxApi.Monster:IsActionScheduled(act)
     assert(self:Exists(), "Monster:IsActionScheduled: Invalid object pointer")
     assert(type(act) == "number", "Monster:IsActionScheduled: arg #1 -- number expected")
 
-    local x = ptrCall2(0x50A0D0, self.ptr, utilIntToPtr(act))
+    local x = ptrCall2(0x50A0D0, self.ptr, utilUIntToPtr(act))
     if x == zeroUserdata then return false end
     return true
 end
@@ -1490,7 +1573,7 @@ function NoxApi.Player:ById(id)
     assert(type(id) == "number", "Player:ById: arg #1 -- player number in range [0; 31] expected")
     if id > 31 or id < 0 then return nil end
 
-    local thirtyone = utilIntToPtr(id)
+    local thirtyone = utilUIntToPtr(id)
     local plri = ptrCall2(0x417090, thirtyone, thirtyone)
     if plri == zeroUserdata then return nil end
     
@@ -1529,7 +1612,7 @@ function NoxApi.Player:SetStatus(flag)
     end
     assert(type(flag) == "number", "Player:SetStatus: arg #1 -- number or string expected")
     
-    ptrCall2(0x4174F0, self.ptr, utilIntToPtr(flag))
+    ptrCall2(0x4174F0, self.ptr, utilUIntToPtr(flag))
 end
 
 -- removes player status flags
@@ -1539,7 +1622,7 @@ function NoxApi.Player:ClearStatus(flag)
     end
     assert(type(flag) == "number", "Player:ClearStatus: arg #1 -- number or string expected")
     
-    ptrCall2(0x417530, self.ptr, utilIntToPtr(flag))
+    ptrCall2(0x417530, self.ptr, utilUIntToPtr(flag))
 end
 
 -- wrapper for Unimod' playerInfo()
@@ -1634,14 +1717,13 @@ function NoxApi.Player:SendNotice(text)
     end
 end
 
--- Returns or alters given amount of gold from player
+-- Returns or alters amount of gold carried by given player
 function NoxApi.Player:Gold(val)
     if val ~= nil then
         assert(type(val) == "number", "Player:Gold: arg #1 -- number expected")
-        if val > 0 then
-            setPtrUInt(self.ptr, 0x874, val)
-            ptrCall2(0x56F920, getPtrPtr(self.ptr, 0x11EC), utilIntToPtr(val))
-        end
+        -- Gold amount can be negative (!)
+        setPtrInt(self.ptr, 0x874, val)
+        ptrCall2(0x56F920, getPtrPtr(self.ptr, 0x11EC), utilSIntToPtr(val))
     end
     
     return getPtrUInt(self.ptr, 0x874)
@@ -1655,7 +1737,7 @@ function NoxApi.Player:Kick(reason)
     local id = getPtrByte(self.ptr, 0x810)
     if id == 31 then error("Player:Kick: can't kick host from server") end
     
-    local result = ptrCall2(0x4DEAB0, utilIntToPtr(id), utilIntToPtr(reason))
+    local result = ptrCall2(0x4DEAB0, utilUIntToPtr(id), utilUIntToPtr(reason))
     if result == zeroUserdata then return false end
     return true
 end
@@ -1979,11 +2061,11 @@ function NoxApi.Server:PlayFX(name, x1, y1, x2, y2, xv)
         setPtrFloat(pt, 4, y1)
         
         if name == NoxApi.MSG_FX_SPARK_EXPLOSION then
-            ptrCall2(0x5231B0, pt, utilIntToPtr(x2))
+            ptrCall2(0x5231B0, pt, utilUIntToPtr(x2))
         elseif name == NoxApi.MSG_FX_ARROW_TRAP then
-            ptrCall2(0x5238A0, pt, utilIntToPtr(x2))
+            ptrCall2(0x5238A0, pt, utilUIntToPtr(x2))
         elseif name == NoxApi.MSG_FX_JIGGLE then
-            ptrCall2(0x4D9110, pt, utilIntToPtr(x2))
+            ptrCall2(0x4D9110, pt, utilUIntToPtr(x2))
         end
         utilMemFree(pt)
         
@@ -2002,7 +2084,7 @@ function NoxApi.Server:PlayFX(name, x1, y1, x2, y2, xv)
         setPtrInt(pt, 4, y1)
         setPtrInt(pt, 8, x2)
         setPtrInt(pt, 12, y2)
-        ptrCall2(0x523790, pt, utilIntToPtr(xv))
+        ptrCall2(0x523790, pt, utilUIntToPtr(xv))
         utilMemFree(pt)
         
     elseif name >= NoxApi.MSG_FX_BLUE_SPARKS and name <= NoxApi.MSG_FX_DAMAGE_POOF or name == NoxApi.MSG_FX_RICOCHET or name == NoxApi.MSG_FX_TURN_UNDEAD or name == NoxApi.MSG_FX_WHITE_FLASH or name == NoxApi.MSG_FX_MANA_BOMB_CANCEL then
@@ -2024,7 +2106,7 @@ function NoxApi.Server:PlayFX(name, x1, y1, x2, y2, xv)
     end
 end
 
-local ptr_DeathmatchFlags = utilIntToPtr(0x654D60)
+local ptr_DeathmatchFlags = utilUIntToPtr(0x654D60)
 -- Returns true if specified DeathmatchFlags are set
 function NoxApi.Server:CheckDeathmatchFlag(flag)
     assert(type(flag) == "number", "Server:CheckDeathmatchFlag: arg #1 -- number expected")
@@ -2057,7 +2139,7 @@ function NoxApi.Server:TeamDamage(val)
     return NoxApi.Server:CheckDeathmatchFlag(1)
 end
 
-local ptr_ServerRuleFlags = utilIntToPtr(0x5D5330)
+local ptr_ServerRuleFlags = utilUIntToPtr(0x5D5330)
 -- Returns true if specified RuleFlags are set
 function NoxApi.Server:CheckRuleFlag(flag)
     if type(flag) == "string" then
@@ -2078,10 +2160,10 @@ function NoxApi.Server:SetRuleFlag(flag, val)
     
     if val then
         --setPtrUInt(ptr_ServerRuleFlags, 0, bitOr(f, flag))
-        ptrCall2(0x409E40, utilIntToPtr(bitOr(f, flag)), zeroUserdata)
+        ptrCall2(0x409E40, utilUIntToPtr(bitOr(f, flag)), zeroUserdata)
     else
         if bitAnd(f, flag) == flag then
-            ptrCall2(0x409E40, utilIntToPtr(bitXor(f, flag)), zeroUserdata)
+            ptrCall2(0x409E40, utilUIntToPtr(bitXor(f, flag)), zeroUserdata)
             --setPtrUInt(ptr_ServerRuleFlags, 0, bitXor(f, flag))
         end
     end
@@ -2119,8 +2201,8 @@ function NoxApi.Server:SetMusic(track, vol)
     if track <= 0 or vol <= 0 then 
         ptrCall2(0x516520, oneUserdata, oneUserdata) -- clearMusic
     else
-        ptrCall2(0x507230, utilIntToPtr(track), oneUserdata) -- scriptPushVal
-        ptrCall2(0x507230, utilIntToPtr(vol), oneUserdata) -- scriptPushVal
+        ptrCall2(0x507230, utilUIntToPtr(track), oneUserdata) -- scriptPushVal
+        ptrCall2(0x507230, utilUIntToPtr(vol), oneUserdata) -- scriptPushVal
         ptrCall2(0x516430, oneUserdata, oneUserdata) -- setMusic
     end
 end
@@ -2251,13 +2333,13 @@ function NoxApi.Util:ConPrint(text, color)
     assert(type(color) == "number", "Util:ConPrint: arg #2 -- number expected")
     
     local str = utilMemLdStr16(text) -- *wchar_t
-    ptrCall2(0x450B90, utilIntToPtr(color), str)
+    ptrCall2(0x450B90, utilUIntToPtr(color), str)
     utilMemFree(str) -- freeing temporary memory
     -- string gets copied to another buffer
 end
 
---local musicStackTop = utilIntToPtr(0x69BA74)
-local musicCurTrack = utilIntToPtr(0x69B970) -- client-side
+--local musicStackTop = utilUIntToPtr(0x69BA74)
+local musicCurTrack = utilUIntToPtr(0x69B970) -- client-side
 
 -- returns current music track and volume
 function NoxApi.Util:GetMusic()
@@ -2269,7 +2351,7 @@ function NoxApi.Util:IsServer()
     return bitAnd(gameFlags(), 0x801) > 0
 end
 
-local ptr_PlasmaJmp = utilIntToPtr(0x4BA99B)
+local ptr_PlasmaJmp = utilUIntToPtr(0x4BA99B)
 -- Unlock Plasma/Staff of Oblivion visuals in multiplayer (only for client though)
 function NoxApi.Util:UnlockPlasma(val)
     if val then 
@@ -2279,7 +2361,7 @@ function NoxApi.Util:UnlockPlasma(val)
     end
 end
 
-local ptr_GameGFlags = utilIntToPtr(0x85B7A0)
+local ptr_GameGFlags = utilUIntToPtr(0x85B7A0)
 -- Returns true if specified GFlags are set
 function NoxApi.Util:CheckGFlag(flag)
     if type(flag) == "string" then
@@ -2307,7 +2389,7 @@ function NoxApi.Util:SetGFlag(flag, val)
     end
 end
 
-local ptr_GameFPS = utilIntToPtr(0x85B3FC)
+local ptr_GameFPS = utilUIntToPtr(0x85B3FC)
 -- Returns Frames per second value
 function NoxApi.Util:GetGameFPS()
     return getPtrInt(ptr_GameFPS, 0)
@@ -2331,21 +2413,21 @@ function NoxApi.Util:Distance(x1, y1, x2, y2)
     return math.sqrt(NoxApi.Util:DistanceSq(x1, y1, x2, y2))
 end
 
-local ptr_Build = utilIntToPtr(0x5D532C)
-local ptr_SrvName = utilIntToPtr(0x5D4AC0)
-local ptr_MapName = utilIntToPtr(0x85B420)
+local ptr_Build = utilUIntToPtr(0x5D532C)
+local ptr_SrvName = utilUIntToPtr(0x5D4AC0)
+local ptr_MapName = utilUIntToPtr(0x85B420)
 -- Returns information about current game session
 function NoxApi.Util:GetGameInfo()
     local r = {}
     -- These are separate for client and player (!)
     local gd = ptrCall2(0x4165B0, zeroUserdata, zeroUserdata)
     -- Returns offset value based on current game mode (!)
-    local gd_26 = utilIntToPtr(getPtrShort(gd, 52)) 
+    local gd_26 = utilUIntToPtr(getPtrShort(gd, 52)) 
     
     r.build = bitAnd(getPtrUInt(ptr_Build, 0), 0xFFFF)
     r.server = memt.utilMemRdStr8(ptr_SrvName)
     r.mapflags = gameFlags() -- These are actually |map| flags, 'general' game flags are different
-    r.gamemode = ptrCall2(0x4573C0, utilIntToPtr(r.mapflags), zeroUserdata)
+    r.gamemode = ptrCall2(0x4573C0, utilUIntToPtr(r.mapflags), zeroUserdata)
     r.gamemode = memt.utilMemRdStr16(r.gamemode)
 
     r.mapname = mapGetName() --memt.utilMemRdStr8(ptr_MapName)

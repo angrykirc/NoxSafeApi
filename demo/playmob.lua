@@ -91,6 +91,7 @@ function PlayerHandleInput(plr, c)
 	local xd = PlayerToExtra[plr:Id()]
 	
 	if xd.input == nil then xd.input = fram end
+	mob:BuffRemove("CHARMING") -- Fix for charming enemy monsters
 
 	if c == 1 and fram - xd.input >= 2 and (ca == 0 or ca == NoxApi.ACTION_MELEE_ATTACK) then 
 		--xd.input = fram
