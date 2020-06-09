@@ -17,7 +17,7 @@ NoxApi.Util = {} -- alias for Client
 -- Waypoint/Journal WIP
 
 -- Code compatibility marker
-NoxApi.Version = 6
+NoxApi.Version = 7
 -- Set this to true, if you want to trade stability for performance
 NoxApi.DisableTableCheck = false
 
@@ -353,9 +353,16 @@ function memt.utilFltToPtr(num)
     return r
 end
 
-function memt.utilPtrToInt(ptr)
+function memt.utilPtrToSInt(ptr)
     setPtrPtr(memt.t, 0, ptr)
     local r = getPtrInt(memt.t, 0)
+    if r == nil then return 0 end
+    return r
+end
+
+function memt.utilPtrToUInt(ptr)
+    setPtrPtr(memt.t, 0, ptr)
+    local r = memt.getPtrUInt(memt.t, 0)
     if r == nil then return 0 end
     return r
 end
@@ -432,8 +439,10 @@ end
 local zeroUserdata = memt.zeroUserdata
 local oneUserdata = memt.oneUserdata
 local utilUIntToPtr = memt.utilUIntToPtr
+local utilSIntToPtr = memt.utilSIntToPtr
 local utilFltToPtr = memt.utilFltToPtr
-local utilPtrToInt = memt.utilPtrToInt
+local utilPtrToUInt = memt.utilPtrToUInt
+local utilPtrToSInt = memt.utilPtrToSInt
 local utilMemLdStr8 = memt.utilMemLdStr8
 local utilMemLdStr16 = memt.utilMemLdStr16
 local utilMAlloc = memt.utilMAlloc
@@ -505,6 +514,19 @@ local function checkExistsImpl(ptr)
     end
     return false
 end
+
+local function buildErrorString(source, arg, err)
+    return string.format("%s: arg #%d -- %s", source, arg, err)
+end
+
+--[[
+local function validateServerObject(source, arg, ptr, conf)
+    local exists = checkExistsImpl(ptr)
+    if not exists then error(buildErrorString(source, arg, "Pointer references invalid object")) end
+    
+    if conf.alive then assert(bitAnd(unitFlags(ptr), 0x8000) > 0, buildErrorString(source, arg, "Unapplicable to dead object")) end
+end
+]]
 
 -- Initialize object from pointer or clone table instance, arg may be nil
 function NoxApi.Object:Init(arg, skipTest)
@@ -1160,7 +1182,7 @@ function NoxApi.Object:GetWeaponType()
     assert(self:Exists(), "Object:GetWeaponType: Invalid object pointer")
     
     local result = ptrCall2(0x415820, self.ptr, self.ptr)
-    return utilPtrToInt(result)
+    return utilPtrToUInt(result)
 end
 
 -- Deals damage by usage of default object function 0x2CC 
@@ -2251,6 +2273,50 @@ function NoxApi.Server:SetMapFlag(flag, value)
     end
 end
 
+
+local abilityShellPtr = utilUIntToPtr(0x580230)
+local abilityMaskPtr = utilUIntToPtr(0x58023C)
+local abilityHookPtr = utilUIntToPtr(0x4FBC7C)
+setPtrUInt(abilityHookPtr, 1, 0x000845AF) -- RVA of shellcode
+local abilityMaskTable = { 2, 4, 8, 0x10, 0x20 } -- shift left by id
+
+local abilityShellCode = { 0x8B, 0x4C, 0x24, 0x08, 0xB8, 0x01, 0x00, 0x00, 0x00, 0xD3, 0xE0, 0x24, 0xFF, 0x85, 0xC0, 0xF7, 0xD0, 0x74, 0x05, 0xE8, 0x08, 0xC0, 0xF7, 0xFF, 0xC3 }
+-- write ability block shellcode
+for i = 1, #abilityShellCode do
+    setPtrByte(abilityShellPtr, i - 1, abilityShellCode[i])
+end
+
+-- Temporarily enables or disables warrior abilities on server side for this game session for ALL players
+function NoxApi.Server:SetAllowAbility(id, val)
+    if type(id) == "string" then
+        id = NoxApi.Util:GetAbilityIdByName(id)
+    end
+    assert(type(id) == "number", "Server:SetAllowAbility: arg #1 -- number or string expected")
+    assert(type(val) == "boolean", "Server:SetAllowAbility: arg #2 -- boolean expected")
+    
+    if id <= 0 or id > 5 then error("Server:SetAllowAbility: arg #1 -- ability with this id does not exist") end
+    local a = getPtrByte(abilityMaskPtr, 0)
+    if val then
+        setPtrByte(abilityMaskPtr, 0, bitOr(a, abilityMaskTable[id]))
+    else
+        if bitOr(a, abilityMaskTable[id]) > 0 then -- clear flag
+            setPtrByte(abilityMaskPtr, 0, bitXor(a, abilityMaskTable[id]))
+        end
+    end
+end
+
+local flameAddPtr = utilUIntToPtr(0x52D6F2)
+-- Make Ring of Flame flames bigger in size
+function NoxApi.Server:LargeROF(val)
+    assert(type(val) == "boolean", "Server:SetAllowAbility: arg #2 -- boolean expected")
+    
+    if val then
+        setPtrByte(flameAddPtr, 0, 0x03) -- add
+    else
+        setPtrByte(flameAddPtr, 0, 0x2B) -- sub
+    end
+end
+
 -- [END] NoxApi.Server
 
 -- [BEGIN] NoxApi.Util
@@ -2258,6 +2324,19 @@ end
 -- Alias for Server:CheckMapFlag (value is shared between client and server)
 function NoxApi.Util:CheckMapFlag(mode)
     return NoxApi.Server:CheckMapFlag(mode)
+end
+
+-- Returns numerical ability id from specified string literal. -1 if not found.
+function NoxApi.Util:GetAbilityIdByName(name)
+    assert(type(name) == "string", "Util:GetAbilityIdByName: string expected")
+    -- prepend ABILITY_
+    if string.sub(name, 0, 8) ~= "ABILITY_" then name = "ABILITY_" .. name end
+    
+    local mstr = utilMemLdStr8(name)
+    local result = ptrCall2(0x424D80, mstr, zeroUserdata)
+    utilMemFree(mstr)
+    if result == zeroUserdata then return -1 end
+    return utilPtrToSInt(result)
 end
 
 -- Returns numerical buff id from specified string literal. -1 if not found.
@@ -2270,7 +2349,7 @@ function NoxApi.Util:GetBuffIdByName(name)
     local result = ptrCall2(0x424880, mstr, zeroUserdata)
     utilMemFree(mstr)
     if result == zeroUserdata and result ~= "ENCHANT_INVISIBLE" then return -1 end
-    return utilPtrToInt(result)
+    return utilPtrToSInt(result)
 end
 
 -- Returns numerical spell id from specified string literal. -1 if not found.
@@ -2283,7 +2362,7 @@ function NoxApi.Util:GetSpellIdByName(name)
     local result = ptrCall2(0x4243F0, mstr, zeroUserdata)
     utilMemFree(mstr)
     if result == zeroUserdata then return -1 end
-    return utilPtrToInt(result)
+    return utilPtrToSInt(result)
 end
 
 -- Returns monster action id from specified string literal. -1 if not found.
@@ -2304,7 +2383,7 @@ function NoxApi.Util:GetSoundIdByName(name)
     local mstr = utilMemLdStr8(name)
     local ud = ptrCall2(0x40AF50, mstr, oneUserdata)
     utilMemFree(mstr)
-    return utilPtrToInt(ud)
+    return utilPtrToSInt(ud)
 end
 
 -- Returns thingId for specified thing name.
@@ -2314,7 +2393,7 @@ function NoxApi.Util:GetThingId(name)
     local mstr = utilMemLdStr8(name)
     local res = ptrCall2(0x4E3AA0, mstr, zeroUserdata)
     utilMemFree(mstr)
-    return utilPtrToInt(res)
+    return utilPtrToSInt(res)
 end
 
 -- Returns numerical Id for specified enchantment name, -1 if not found
@@ -2324,7 +2403,7 @@ function NoxApi.Util:GetItemEnchantId(name)
     local mstr = utilMemLdStr8(name)
     local res = ptrCall2(0x413290, mstr, zeroUserdata)
     utilMemFree(mstr)
-    res = utilPtrToInt(res)
+    res = utilPtrToSInt(res)
     if res == 255 then return -1 end 
     return res
 end
@@ -2438,14 +2517,14 @@ function NoxApi.Util:GetGameInfo()
 
     r.mapname = mapGetName() --memt.utilMemRdStr8(ptr_MapName)
     r.p_online = ptrCall2(0x416F40, zeroUserdata, zeroUserdata)
-    r.p_online = utilPtrToInt(r.p_online)
+    r.p_online = utilPtrToSInt(r.p_online)
     r.p_max = ptrCall2(0x409FA0, zeroUserdata, zeroUserdata)
-    r.p_max = utilPtrToInt(r.p_max)
+    r.p_max = utilPtrToSInt(r.p_max)
     
     r.timelimit = ptrCall2(0x40A180, gd_26, zeroUserdata)
-    r.timelimit = utilPtrToInt(r.timelimit)
+    r.timelimit = utilPtrToSInt(r.timelimit)
     r.lessonlimit = ptrCall2(0x40A020, gd_26, zeroUserdata)
-    r.lessonlimit = utilPtrToInt(r.lessonlimit)
+    r.lessonlimit = utilPtrToSInt(r.lessonlimit)
     return r
 end
 
